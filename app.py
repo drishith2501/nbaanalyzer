@@ -127,9 +127,9 @@ def index():
 @app.route("/api/upcoming")
 def api_upcoming():
     """
-    Fetch upcoming playoff games (today + 10 days) and run predictions on each.
-    Results cached for 15 minutes to avoid hammering the API.
-    Falls back to demo data on Vercel if API fails.
+    Fetch upcoming playoff games and run predictions on each.
+    On Vercel, uses demo games. Locally, attempts to fetch real games.
+    Results cached for 15 minutes.
     """
     try:
         force = request.args.get("force") == "1"
@@ -146,19 +146,35 @@ def api_upcoming():
 
         model_ready = os.path.exists(config.MODEL_FILE) and os.path.exists(config.SCALER_FILE)
 
-        # Demo data for quick fallback
+        # Demo games (works everywhere, no API calls)
         demo_games = [
-            {"home_abbr": "LAL", "away_abbr": "DEN", "game_time": "May 9, 7:30 PM ET", "date_label": "Thursday, May 9", "status": "Upcoming"},
-            {"home_abbr": "BOS", "away_abbr": "MIA", "game_time": "May 9, 9:00 PM ET", "date_label": "Thursday, May 9", "status": "Upcoming"},
+            {
+                "home_abbr": "LAL", "away_abbr": "DEN",
+                "home_name": "Los Angeles Lakers", "away_name": "Denver Nuggets",
+                "date_label": "Thursday, May 9", "status": "Upcoming",
+                "live": False, "finished": False
+            },
+            {
+                "home_abbr": "BOS", "away_abbr": "MIA",
+                "home_name": "Boston Celtics", "away_name": "Miami Heat",
+                "date_label": "Thursday, May 9", "status": "Upcoming",
+                "live": False, "finished": False
+            },
         ]
 
+        # Try to fetch real games (only works locally)
+        raw_games = demo_games
         try:
-            from upcoming_games import get_upcoming_playoff_games
-            raw_games = get_upcoming_playoff_games(days_ahead=3)
-            print(f"  ✓ Fetched {len(raw_games)} real games from NBA API")
+            import os
+            # Only attempt nba_api if NOT on Vercel (Vercel has env VERCEL=1)
+            if not os.environ.get("VERCEL"):
+                from upcoming_games import get_upcoming_playoff_games
+                fetched = get_upcoming_playoff_games(days_ahead=3)
+                if fetched and len(fetched) > 0:
+                    raw_games = fetched
+                    print(f"  ✓ Fetched {len(fetched)} real games from NBA API")
         except Exception as api_exc:
-            print(f"  ✗ NBA API error (using demo data): {api_exc}")
-            raw_games = demo_games
+            print(f"  NBA API unavailable: {api_exc}. Using demo games.")
 
         enriched = []
         for g in raw_games:
@@ -167,7 +183,7 @@ def api_upcoming():
                 try:
                     pred = _predict_game(
                         g["home_abbr"], g["away_abbr"],
-                        home_rest=2, away_rest=2,   # default; no injury/rest API available
+                        home_rest=2, away_rest=2,
                         home_seed=1, away_seed=8,
                         season=season,
                     )
@@ -180,8 +196,8 @@ def api_upcoming():
                 entry["predicted"] = False
                 entry["error"] = "Model not trained yet."
 
-            entry["home_name"] = ABB_TO_NAME.get(g["home_abbr"], g["home_abbr"])
-            entry["away_name"] = ABB_TO_NAME.get(g["away_abbr"], g["away_abbr"])
+            entry["home_name"] = entry.get("home_name") or ABB_TO_NAME.get(g["home_abbr"], g["home_abbr"])
+            entry["away_name"] = entry.get("away_name") or ABB_TO_NAME.get(g["away_abbr"], g["away_abbr"])
             enriched.append(entry)
 
         cached["games"] = enriched
@@ -191,7 +207,6 @@ def api_upcoming():
 
     except Exception as exc:
         traceback.print_exc()
-        # Even on error, return empty games list with 200 status
         return jsonify({"error": str(exc), "games": []}), 200
 
 
