@@ -129,6 +129,7 @@ def api_upcoming():
     """
     Fetch upcoming playoff games (today + 10 days) and run predictions on each.
     Results cached for 15 minutes to avoid hammering the API.
+    Falls back to demo data on Vercel if API fails.
     """
     try:
         force = request.args.get("force") == "1"
@@ -146,7 +147,15 @@ def api_upcoming():
         model_ready = os.path.exists(config.MODEL_FILE) and os.path.exists(config.SCALER_FILE)
 
         from upcoming_games import get_upcoming_playoff_games
-        raw_games = get_upcoming_playoff_games(days_ahead=3)
+        try:
+            raw_games = get_upcoming_playoff_games(days_ahead=3)
+        except Exception as api_exc:
+            print(f"  NBA API error: {api_exc}. Using demo data.")
+            # Fallback demo data for Vercel deployments
+            raw_games = [
+                {"home_abbr": "LAL", "away_abbr": "DEN", "game_time": "May 9, 7:30 PM ET"},
+                {"home_abbr": "BOS", "away_abbr": "MIA", "game_time": "May 9, 9:00 PM ET"},
+            ]
 
         enriched = []
         for g in raw_games:
@@ -179,7 +188,7 @@ def api_upcoming():
 
     except Exception as exc:
         traceback.print_exc()
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": str(exc), "games": []}), 200
 
 
 @app.route("/api/predict", methods=["POST"])

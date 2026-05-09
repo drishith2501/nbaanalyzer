@@ -11,6 +11,8 @@ Returns structured game dicts ready for prediction.
 import time
 import datetime
 from zoneinfo import ZoneInfo
+import signal
+from contextlib import contextmanager
 
 import config
 
@@ -18,6 +20,13 @@ ET = ZoneInfo("America/New_York")
 
 # Playoff game IDs start with "004"
 PLAYOFF_PREFIX = "004"
+
+# API timeout in seconds (Vercel has 10s soft limit)
+API_TIMEOUT = 8
+
+
+def _timeout_handler(signum, frame):
+    raise TimeoutError("NBA API request timed out")
 
 
 def _today_et() -> datetime.date:
@@ -29,8 +38,21 @@ def _parse_live_games(include_finished: bool = False) -> list[dict]:
     from nba_api.live.nba.endpoints import scoreboard as live_sb
 
     try:
+        # Set timeout alarm (Unix only; ignored on Windows/Vercel)
+        try:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(API_TIMEOUT)
+        except (ValueError, AttributeError):
+            pass  # signal.alarm not available on Windows/some systems
+        
         data = live_sb.ScoreBoard().get_dict()
         games = data["scoreboard"]["games"]
+        
+        try:
+            signal.alarm(0)  # Cancel alarm
+        except (ValueError, AttributeError):
+            pass
+        
         time.sleep(config.REQUEST_DELAY)
     except Exception as exc:
         print(f"  Live API error: {exc}")
@@ -84,9 +106,21 @@ def _parse_future_games(days_ahead: int = 10) -> list[dict]:
         date_label = check_date.strftime("%A, %b %d").replace(" 0", " ")
 
         try:
+            try:
+                signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(API_TIMEOUT)
+            except (ValueError, AttributeError):
+                pass
+            
             sb3 = scoreboardv3.ScoreboardV3(game_date=date_str, league_id="00")
             time.sleep(config.REQUEST_DELAY)
             games = sb3.get_dict()["scoreboard"]["games"]
+            
+            try:
+                signal.alarm(0)
+            except (ValueError, AttributeError):
+                pass
+                
         except Exception as exc:
             print(f"  ScoreboardV3 error for {date_str}: {exc}")
             continue
