@@ -290,7 +290,8 @@ def api_upcoming():
         enriched = []
         for g in raw_games:
             entry = dict(g)
-            if model_ready:
+            # Skip predictions on Vercel to avoid API timeouts
+            if model_ready and not is_vercel:
                 try:
                     pred = _predict_game(
                         g["home_abbr"], g["away_abbr"],
@@ -305,7 +306,10 @@ def api_upcoming():
                     entry["error"] = str(exc)
             else:
                 entry["predicted"] = False
-                entry["error"] = "Model not trained yet."
+                if is_vercel:
+                    entry["error"] = "Predictions unavailable on Vercel"
+                else:
+                    entry["error"] = "Model not trained yet."
 
             entry["home_name"] = entry.get("home_name") or ABB_TO_NAME.get(g["home_abbr"], g["home_abbr"])
             entry["away_name"] = entry.get("away_name") or ABB_TO_NAME.get(g["away_abbr"], g["away_abbr"])
