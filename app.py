@@ -233,6 +233,38 @@ def api_upcoming():
     """
     try:
         is_vercel = os.environ.get("VERCEL") is not None
+        
+        # On Vercel: Return hardcoded data IMMEDIATELY without any API calls
+        if is_vercel:
+            return jsonify({
+                "games": [
+                    {
+                        "home_abbr": "LAL", "away_abbr": "DEN",
+                        "home_name": "Los Angeles Lakers", "away_name": "Denver Nuggets",
+                        "date_label": "Thu, May 9", "status": "Upcoming",
+                        "live": False, "finished": False,
+                        "predicted": False
+                    },
+                    {
+                        "home_abbr": "BOS", "away_abbr": "MIA",
+                        "home_name": "Boston Celtics", "away_name": "Miami Heat",
+                        "date_label": "Thu, May 9", "status": "Upcoming",
+                        "live": False, "finished": False,
+                        "predicted": False
+                    },
+                    {
+                        "home_abbr": "DEN", "away_abbr": "OKC",
+                        "home_name": "Denver Nuggets", "away_name": "Oklahoma City Thunder",
+                        "date_label": "Fri, May 10", "status": "Upcoming",
+                        "live": False, "finished": False,
+                        "predicted": False
+                    },
+                ],
+                "cached": False,
+                "count": 3
+            }), 200
+        
+        # ── LOCAL DEVELOPMENT: Fetch real data ──────────────────────────────
         force = request.args.get("force") == "1"
         now = datetime.datetime.utcnow()
         season = request.args.get("season", "2025-26")
@@ -250,8 +282,16 @@ def api_upcoming():
             ALL_TEAMS = _get_all_teams()
             ABB_TO_NAME = {t["abbr"]: t["name"] for t in ALL_TEAMS}
 
-        # On Vercel: Use fallback immediately to avoid timeouts
-        if is_vercel:
+        raw_games = []
+        try:
+            from upcoming_games import get_upcoming_playoff_games
+            fetched = get_upcoming_playoff_games(days_ahead=3)
+            if fetched and len(fetched) > 0:
+                raw_games = fetched
+                print(f"  ✓ Fetched {len(fetched)} real games from NBA API")
+        except Exception as api_exc:
+            print(f"  NBA API error: {api_exc}")
+            # Use fallback if API fails locally too
             fallback_games = [
                 {
                     "home_abbr": "LAL", "away_abbr": "DEN",
@@ -273,19 +313,6 @@ def api_upcoming():
                 },
             ]
             raw_games = fallback_games
-        else:
-            # Locally: Try to fetch real games from NBA API
-            raw_games = []
-            try:
-                from upcoming_games import get_upcoming_playoff_games
-                fetched = get_upcoming_playoff_games(days_ahead=3)
-                if fetched and len(fetched) > 0:
-                    raw_games = fetched
-                    print(f"  ✓ Fetched {len(fetched)} real games from NBA API")
-            except Exception as api_exc:
-                print(f"  NBA API error: {api_exc}")
-                # Use fallback if API fails locally too
-                raw_games = fallback_games
 
         enriched = []
         for g in raw_games:
