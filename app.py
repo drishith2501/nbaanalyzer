@@ -228,11 +228,11 @@ def index():
 def api_upcoming():
     """
     Return upcoming playoff games with predictions.
-    On Vercel, instantly returns hardcoded data (no API calls).
-    Locally, fetches real games and predictions.
+    On Vercel: Returns hardcoded data (no slow API calls).
+    Locally: Fetches real games and predictions from NBA API.
     """
     try:
-        # Fetch real games and predictions (both locally and on Vercel)
+        is_vercel = os.environ.get("VERCEL") is not None
         force = request.args.get("force") == "1"
         now = datetime.datetime.utcnow()
         season = request.args.get("season", "2025-26")
@@ -250,16 +250,8 @@ def api_upcoming():
             ALL_TEAMS = _get_all_teams()
             ABB_TO_NAME = {t["abbr"]: t["name"] for t in ALL_TEAMS}
 
-        raw_games = []
-        try:
-            from upcoming_games import get_upcoming_playoff_games
-            fetched = get_upcoming_playoff_games(days_ahead=3)
-            if fetched and len(fetched) > 0:
-                raw_games = fetched
-                print(f"  ✓ Fetched {len(fetched)} real games from NBA API")
-        except Exception as api_exc:
-            print(f"  NBA API error: {api_exc}")
-            # Fallback to hardcoded games on error (for Vercel timeouts)
+        # On Vercel: Use fallback immediately to avoid timeouts
+        if is_vercel:
             fallback_games = [
                 {
                     "home_abbr": "LAL", "away_abbr": "DEN",
@@ -281,6 +273,19 @@ def api_upcoming():
                 },
             ]
             raw_games = fallback_games
+        else:
+            # Locally: Try to fetch real games from NBA API
+            raw_games = []
+            try:
+                from upcoming_games import get_upcoming_playoff_games
+                fetched = get_upcoming_playoff_games(days_ahead=3)
+                if fetched and len(fetched) > 0:
+                    raw_games = fetched
+                    print(f"  ✓ Fetched {len(fetched)} real games from NBA API")
+            except Exception as api_exc:
+                print(f"  NBA API error: {api_exc}")
+                # Use fallback if API fails locally too
+                raw_games = fallback_games
 
         enriched = []
         for g in raw_games:
